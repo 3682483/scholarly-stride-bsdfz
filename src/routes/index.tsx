@@ -1,7 +1,9 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
+import { useState } from "react";
+import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { RiskDot, SectionCard, Stat, Tag, Progress } from "@/components/ui-bits";
-import { alerts, projects, getProject } from "@/lib/mock-data";
+import { getDashboardFn, toggleTodoFn } from "@/api/dashboard";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -20,14 +22,28 @@ export const Route = createFileRoute("/")({
       { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
+  loader: async () => await getDashboardFn(),
   component: Dashboard,
 });
 
 function Dashboard() {
-  const active = projects.filter((p) => p.stage !== "归档");
-  const avgComplete = Math.round(
-    active.reduce((s, p) => s + p.completeness, 0) / active.length,
-  );
+  const data = Route.useLoaderData();
+  const router = useRouter();
+  const [pendingTodo, setPendingTodo] = useState<number | null>(null);
+
+  const pendingCount = data.todos.filter((t) => !t.done).length;
+
+  const handleToggle = async (id: number, done: boolean) => {
+    setPendingTodo(id);
+    try {
+      await toggleTodoFn({ data: { id, done } });
+      await router.invalidate();
+    } catch {
+      toast.error("更新待办失败，请稍后重试");
+    } finally {
+      setPendingTodo(null);
+    }
+  };
 
   return (
     <AppShell
@@ -43,10 +59,18 @@ function Dashboard() {
       }
     >
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat label="在研课题" value={active.length} hint={`累计 ${projects.length} 项，含已归档`} />
-        <Stat label="材料完整率" value={`${avgComplete}%`} hint="目标 ≥95%" />
-        <Stat label="过程预警" value={alerts.length} hint="1 红 · 2 黄" />
-        <Stat label="本周待办" value={5} hint="形式审查 2 · 评审分配 1 · 退回复核 2" />
+        <Stat
+          label="在研课题"
+          value={data.activeCount}
+          hint={`累计 ${data.totalCount} 项，含已归档`}
+        />
+        <Stat label="材料完整率" value={`${data.avgCompleteness}%`} hint="目标 ≥95%" />
+        <Stat
+          label="过程预警"
+          value={data.alertCount}
+          hint={`${data.redCount} 红 · ${data.amberCount} 黄`}
+        />
+        <Stat label="待办事项" value={pendingCount} hint={`共 ${data.todos.length} 项`} />
       </div>
 
       <div className="mt-6 grid gap-4 xl:grid-cols-3">
@@ -56,27 +80,27 @@ function Dashboard() {
             action={<span className="text-xs text-muted-foreground">按紧急度排序</span>}
           >
             <ul className="divide-y divide-border">
-              {alerts.map((a) => {
-                const p = getProject(a.projectId);
-                return (
-                  <li key={a.projectId} className="flex flex-wrap items-center gap-3 py-3">
-                    <RiskDot risk={a.level} />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium">{p?.title}</div>
-                      <div className="mt-0.5 text-xs text-muted-foreground">
-                        {a.title} · 责任人 {a.owner}
-                      </div>
+              {data.alerts.map((a) => (
+                <li key={a.id} className="flex flex-wrap items-center gap-3 py-3">
+                  <RiskDot risk={a.level} />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium">{a.projectTitle}</div>
+                    <div className="mt-0.5 text-xs text-muted-foreground">
+                      {a.title} · 责任人 {a.owner}
                     </div>
-                    <Link
-                      to="/projects/$projectId"
-                      params={{ projectId: a.projectId }}
-                      className="rounded border border-border px-2.5 py-1 text-xs hover:bg-secondary"
-                    >
-                      处理
-                    </Link>
-                  </li>
-                );
-              })}
+                  </div>
+                  <Link
+                    to="/projects/$projectId"
+                    params={{ projectId: a.projectId }}
+                    className="rounded border border-border px-2.5 py-1 text-xs hover:bg-secondary"
+                  >
+                    处理
+                  </Link>
+                </li>
+              ))}
+              {data.alerts.length === 0 ? (
+                <li className="py-6 text-center text-sm text-muted-foreground">当前没有预警课题。</li>
+              ) : null}
             </ul>
           </SectionCard>
 
@@ -90,25 +114,22 @@ function Dashboard() {
               }
             >
               <ul className="space-y-3">
-                {active
-                  .slice()
-                  .sort((a, b) => a.completeness - b.completeness)
-                  .map((p) => (
-                    <li key={p.id} className="space-y-1.5">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Tag tone="primary">{p.stage}</Tag>
-                        <Link
-                          to="/projects/$projectId"
-                          params={{ projectId: p.id }}
-                          className="min-w-0 flex-1 truncate text-sm hover:underline"
-                        >
-                          {p.title}
-                        </Link>
-                        <span className="text-xs text-muted-foreground">{p.nextDue}</span>
-                      </div>
-                      <Progress value={p.completeness} />
-                    </li>
-                  ))}
+                {data.upcoming.map((p) => (
+                  <li key={p.id} className="space-y-1.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Tag tone="primary">{p.stage}</Tag>
+                      <Link
+                        to="/projects/$projectId"
+                        params={{ projectId: p.id }}
+                        className="min-w-0 flex-1 truncate text-sm hover:underline"
+                      >
+                        {p.title}
+                      </Link>
+                      <span className="text-xs text-muted-foreground">{p.nextDue}</span>
+                    </div>
+                    <Progress value={p.completeness} />
+                  </li>
+                ))}
               </ul>
             </SectionCard>
           </div>
@@ -116,18 +137,23 @@ function Dashboard() {
 
         <div className="space-y-4">
           <SectionCard title="我的待办">
-            {[
-              { t: "形式审查：AI辅助英语写作反馈机制", s: "今日截止" },
-              { t: "分配评审专家：2026校级第二批（3项）", s: "9月26日" },
-              { t: "复核退回材料：经费使用明细", s: "待提交" },
-              { t: "排期开题论证会：初中数学项目化学习", s: "9月24日" },
-              { t: "催办结题材料：县域拔尖创新人才", s: "逾期风险" },
-            ].map((x) => (
-              <label key={x.t} className="flex items-start gap-2 py-2 text-sm">
-                <input type="checkbox" className="mt-1 accent-[var(--primary)]" />
+            {data.todos.map((x) => (
+              <label
+                key={x.id}
+                className={`flex items-start gap-2 py-2 text-sm ${
+                  pendingTodo === x.id ? "opacity-60" : ""
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={x.done}
+                  disabled={pendingTodo === x.id}
+                  onChange={(e) => handleToggle(x.id, e.target.checked)}
+                  className="mt-1 accent-[var(--primary)]"
+                />
                 <span className="flex-1">
-                  {x.t}
-                  <span className="mt-0.5 block text-xs text-muted-foreground">{x.s}</span>
+                  <span className={x.done ? "text-muted-foreground line-through" : ""}>{x.title}</span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">{x.due}</span>
                 </span>
               </label>
             ))}

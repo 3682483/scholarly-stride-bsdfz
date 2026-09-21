@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { STAGES, riskLabel, type Risk, type Stage } from "@/lib/mock-data";
+import { STAGES, riskLabel, type Risk, type Stage } from "@/lib/types";
 
 export function RiskDot({ risk }: { risk: Risk }) {
   const cls =

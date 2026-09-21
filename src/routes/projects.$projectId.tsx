@@ -1,12 +1,15 @@
-import { createFileRoute, Link, notFound } from "@tanstack/react-router";
+import { createFileRoute, Link, notFound, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
+import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { Progress, RiskDot, SectionCard, StageTrack, Tag } from "@/components/ui-bits";
-import { getProject } from "@/lib/mock-data";
+import { ReviewWorkflow } from "@/components/ReviewWorkflow";
+import { STAGES, type MaterialStatus } from "@/lib/types";
+import { advanceStageFn, exportProjectFn, getProjectFn, setMaterialStatusFn } from "@/api/projects";
 
 export const Route = createFileRoute("/projects/$projectId")({
-  loader: ({ params }) => {
-    const project = getProject(params.projectId);
+  loader: async ({ params }) => {
+    const project = await getProjectFn({ data: { id: params.projectId } });
     if (!project) throw notFound();
     return { project };
   },
@@ -36,7 +39,71 @@ const tabs = ["过程管理", "材料档案", "专家与评审", "经费", "操�
 
 function ProjectDetail() {
   const { project: p } = Route.useLoaderData();
+  const router = useRouter();
   const [tab, setTab] = useState<(typeof tabs)[number]>("过程管理");
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const stageIndex = STAGES.indexOf(p.stage);
+  const nextStage = STAGES[stageIndex + 1];
+  const stageReviewLabel =
+    p.stage === "结题"
+      ? "结题验收"
+      : p.stage === "中期"
+        ? "中期检查"
+        : p.stage === "开题"
+          ? "开题论证"
+          : "过程审核";
+
+  const handleExport = async () => {
+    setBusy("export");
+    try {
+      const archive = await exportProjectFn({ data: { id: p.id } });
+      if (!archive) {
+        toast.error("导出失败：课题不存在");
+        return;
+      }
+      const blob = new Blob([JSON.stringify(archive, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${p.code}-一题一档.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("一题一档已导出");
+      await router.invalidate();
+    } catch {
+      toast.error("导出失败");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleAdvance = async () => {
+    if (!nextStage) return;
+    setBusy("stage");
+    try {
+      await advanceStageFn({ data: { projectId: p.id, stage: nextStage } });
+      toast.success(`课题已推进至「${nextStage}」阶段`);
+      await router.invalidate();
+    } catch {
+      toast.error("阶段推进失败");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleMaterial = async (materialId: number, status: MaterialStatus) => {
+    setBusy(`material-${materialId}`);
+    try {
+      await setMaterialStatusFn({ data: { projectId: p.id, materialId, status } });
+      toast.success(`材料状态更新为「${status}」`);
+      await router.invalidate();
+    } catch {
+      toast.error("更新材料状态失败");
+    } finally {
+      setBusy(null);
+    }
+  };
 
   return (
     <AppShell
@@ -50,8 +117,12 @@ function ProjectDetail() {
           >
             返回课题库
           </Link>
-          <button className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground">
-            导出一题一档
+          <button
+            onClick={handleExport}
+            disabled={busy === "export"}
+            className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {busy === "export" ? "导出中…" : "导出一题一档"}
           </button>
         </>
       }
@@ -62,23 +133,30 @@ function ProjectDetail() {
           <Tag>{p.subject}</Tag>
           <Tag tone="primary">{p.stage}阶段</Tag>
           <RiskDot risk={p.risk} />
-          <span className="ml-auto text-xs text-muted-foreground">
-            下一节点：{p.nextDue}
-          </span>
+          <span className="ml-auto text-xs text-muted-foreground">下一节点：{p.nextDue}</span>
         </div>
         <p className="mt-3 text-sm text-muted-foreground">{p.abstract}</p>
         <div className="mt-4">
           <StageTrack current={p.stage} />
         </div>
+        {nextStage ? (
+          <div className="mt-3">
+            <button
+              onClick={handleAdvance}
+              disabled={busy === "stage"}
+              className="rounded-md border border-primary/40 bg-primary/5 px-3 py-1.5 text-xs text-primary transition-colors hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {busy === "stage" ? "处理中…" : `推进至「${nextStage}」阶段`}
+            </button>
+          </div>
+        ) : null}
         <div className="mt-4 grid gap-4 sm:grid-cols-3">
           <div>
             <div className="mb-1 text-xs text-muted-foreground">研究进度 {p.progress}%</div>
             <Progress value={p.progress} />
           </div>
           <div>
-            <div className="mb-1 text-xs text-muted-foreground">
-              材料完整率 {p.completeness}%
-            </div>
+            <div className="mb-1 text-xs text-muted-foreground">材料完整率 {p.completeness}%</div>
             <Progress value={p.completeness} />
           </div>
           <div>
@@ -147,10 +225,18 @@ function ProjectDetail() {
                   过程数据将自动汇总为中期 / 结题报告初稿，需负责人人工复核后提交。
                 </p>
               </SectionCard>
+              <SectionCard title={`阶段审核 · ${stageReviewLabel}`}>
+                <ReviewWorkflow
+                  projectId={p.id}
+                  stage={stageReviewLabel}
+                  onDone={() => router.invalidate()}
+                />
+              </SectionCard>
             </>
           ) : null}
 
           {tab === "材料档案" ? (
+            <>
             <SectionCard title="佐证材料（按阶段）">
               <table className="w-full text-sm">
                 <thead className="text-left text-xs text-muted-foreground">
@@ -160,11 +246,12 @@ function ProjectDetail() {
                     <th>责任人</th>
                     <th>提交时间</th>
                     <th>状态</th>
+                    <th className="text-right">操作</th>
                   </tr>
                 </thead>
                 <tbody>
                   {p.materials.map((m) => (
-                    <tr key={m.name} className="border-b border-border/70">
+                    <tr key={m.id} className="border-b border-border/70">
                       <td className="py-2.5">{m.name}</td>
                       <td className="text-xs text-muted-foreground">{m.stage}</td>
                       <td className="text-xs text-muted-foreground">{m.owner}</td>
@@ -182,23 +269,52 @@ function ProjectDetail() {
                           {m.status}
                         </Tag>
                       </td>
+                      <td className="text-right">
+                        <div className="flex justify-end gap-1">
+                          {m.status !== "已提交" ? (
+                            <button
+                              onClick={() => handleMaterial(m.id, "已提交")}
+                              disabled={busy === `material-${m.id}`}
+                              className="rounded border border-border px-2 py-0.5 text-xs hover:bg-secondary disabled:opacity-50"
+                            >
+                              确认提交
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleMaterial(m.id, "已退回")}
+                              disabled={busy === `material-${m.id}`}
+                              className="rounded border border-border px-2 py-0.5 text-xs hover:bg-secondary disabled:opacity-50"
+                            >
+                              退回
+                            </button>
+                          )}
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <p className="mt-3 text-xs text-muted-foreground">
+                材料状态变更将自动写入「操作留痕」，并可追溯责任人与时间。
+              </p>
             </SectionCard>
+            <SectionCard title="材料审核">
+              <ReviewWorkflow projectId={p.id} stage="材料审核" onDone={() => router.invalidate()} />
+            </SectionCard>
+            </>
           ) : null}
 
           {tab === "专家与评审" ? (
+            <>
             <SectionCard title="专家意见与整改闭环">
-              {p.reviews?.length ? (
+              {p.reviews.length ? (
                 <ul className="space-y-3">
                   {p.reviews.map((r) => (
-                    <li key={r.expert} className="rounded-md border border-border px-3 py-3">
+                    <li key={r.id} className="rounded-md border border-border px-3 py-3">
                       <div className="flex items-center gap-2 text-sm">
                         <span className="font-medium">{r.expert}</span>
                         <Tag tone="primary">{r.score} 分</Tag>
-                        <span className="ml-auto text-xs text-muted-foreground">待整改复核</span>
+                        <span className="ml-auto text-xs text-muted-foreground">{r.status}</span>
                       </div>
                       <p className="mt-2 text-sm text-muted-foreground">{r.comment}</p>
                     </li>
@@ -208,6 +324,10 @@ function ProjectDetail() {
                 <p className="text-sm text-muted-foreground">该课题暂无评审记录。</p>
               )}
             </SectionCard>
+            <SectionCard title="评审汇总审核">
+              <ReviewWorkflow projectId={p.id} stage="评审汇总" onDone={() => router.invalidate()} />
+            </SectionCard>
+            </>
           ) : null}
 
           {tab === "经费" ? (
@@ -230,7 +350,7 @@ function ProjectDetail() {
             <SectionCard title="全过程留痕（不可篡改）">
               <ol className="space-y-4">
                 {p.logs.map((l) => (
-                  <li key={l.time} className="flex gap-3">
+                  <li key={l.id} className="flex gap-3">
                     <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-primary/50" />
                     <div>
                       <div className="text-sm">
@@ -254,9 +374,7 @@ function ProjectDetail() {
               {p.members.map((m, i) => (
                 <li key={m} className="flex items-center justify-between">
                   <span>{m}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {i === 0 ? "负责人" : "成员"}
-                  </span>
+                  <span className="text-xs text-muted-foreground">{i === 0 ? "负责人" : "成员"}</span>
                 </li>
               ))}
             </ul>
@@ -264,10 +382,16 @@ function ProjectDetail() {
           <SectionCard title="合规检测">
             <ul className="space-y-2 text-sm">
               <li className="flex items-center justify-between">
-                查重率 <Tag tone="ok">8.6%</Tag>
+                查重率{" "}
+                <Tag tone={p.plagiarismRate !== null && p.plagiarismRate >= 20 ? "danger" : "ok"}>
+                  {p.plagiarismRate !== null ? `${p.plagiarismRate}%` : "未检测"}
+                </Tag>
               </li>
               <li className="flex items-center justify-between">
-                AIGC 比例 <Tag tone="warn">21%</Tag>
+                AIGC 比例{" "}
+                <Tag tone={p.aigcRate !== null && p.aigcRate >= 30 ? "danger" : "warn"}>
+                  {p.aigcRate !== null ? `${p.aigcRate}%` : "未检测"}
+                </Tag>
               </li>
               <li className="flex items-center justify-between">
                 AI 使用声明 <Tag tone="ok">已填写</Tag>

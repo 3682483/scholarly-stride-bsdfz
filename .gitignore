@@ -20,6 +20,20 @@ dist-ssr
 .wrangler/
 .dev.vars
 
+# Local SQLite database (created at runtime)
+data/
+*.sqlite
+*.db
+
+# Local env (secrets) — keep .env.example committed
+.env
+.env.local
+.env.*.local
+
+# Local dev server logs
+dev.log
+dev.err
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
