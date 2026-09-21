@@ -1,12 +1,12 @@
 import { createServerFn } from "@tanstack/react-start";
 
-import { CURRENT_ACTOR } from "@/lib/constants";
 import type { Level, MaterialStatus, ProjectDraft, Stage } from "@/lib/types";
 import {
   appendLog,
   checkEligibility,
   createBatch,
   createProject,
+  getCurrentActor,
   getProjectById,
   listBatches,
   listProjectSummaries,
@@ -30,7 +30,7 @@ export const setMaterialStatusFn = createServerFn({ method: "POST" })
     updateMaterialStatus(data.materialId, data.status);
     appendLog(
       data.projectId,
-      CURRENT_ACTOR,
+      getCurrentActor(),
       data.status === "已提交" ? "确认材料提交" : "退回材料",
       `材料编号 ${data.materialId}`,
     );
@@ -41,7 +41,7 @@ export const advanceStageFn = createServerFn({ method: "POST" })
   .validator((input: { projectId: string; stage: Stage }) => input)
   .handler(async ({ data }) => {
     updateProjectStage(data.projectId, data.stage);
-    appendLog(data.projectId, CURRENT_ACTOR, "推进课题阶段", `阶段更新为「${data.stage}」`);
+    appendLog(data.projectId, getCurrentActor(), "推进课题阶段", `阶段更新为「${data.stage}」`);
     return getProjectById(data.projectId);
   });
 
@@ -51,10 +51,10 @@ export const exportProjectFn = createServerFn({ method: "GET" })
   .handler(async ({ data }) => {
     const project = getProjectById(data.id);
     if (!project) return null;
-    appendLog(project.id, CURRENT_ACTOR, "导出一题一档", "生成课题全过程档案");
+    appendLog(project.id, getCurrentActor(), "导出一题一档", "生成课题全过程档案");
     return {
       exportedAt: new Date().toISOString(),
-      exportedBy: CURRENT_ACTOR,
+      exportedBy: getCurrentActor(),
       project,
     };
   });

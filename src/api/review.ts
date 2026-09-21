@@ -1,31 +1,43 @@
 import { createServerFn } from "@tanstack/react-start";
 
-import { CURRENT_ACTOR } from "@/lib/constants";
-import type { CheckItem, Expert, ProjectSummary } from "@/lib/types";
+import { PERMISSION_LABELS } from "@/lib/permissions";
+import type { CheckItem, Expert, ReviewQueueItem } from "@/lib/types";
 import {
   assignExperts,
   getAssignedExpertIds,
+  getCurrentActor,
+  getCurrentUser,
   listChecks,
   listExperts,
-  listReviewCandidates,
+  listReviewQueue,
+  reopenReview,
   setCheckResult,
 } from "@/db/queries.server";
 
+function assertPermission(permission: string): void {
+  const user = getCurrentUser();
+  if (!user?.permissions.includes(permission)) {
+    throw new Error(
+      `无权限执行该操作（需要「${PERMISSION_LABELS[permission] ?? permission}」权限）`,
+    );
+  }
+}
+
 export type ReviewBoard = {
-  candidates: ProjectSummary[];
+  queue: ReviewQueueItem[];
   checks: CheckItem[];
   experts: Expert[];
   assignments: Record<string, string[]>;
 };
 
 function buildBoard(): ReviewBoard {
-  const candidates = listReviewCandidates();
+  const queue = listReviewQueue();
   const assignments: Record<string, string[]> = {};
-  for (const c of candidates) {
-    assignments[c.id] = getAssignedExpertIds(c.id);
+  for (const item of queue) {
+    assignments[item.id] = getAssignedExpertIds(item.id);
   }
   return {
-    candidates,
+    queue,
     checks: listChecks(),
     experts: listExperts(),
     assignments,
@@ -39,7 +51,7 @@ export const getReviewBoardFn = createServerFn({ method: "GET" }).handler(async 
 export const assignExpertsFn = createServerFn({ method: "POST" })
   .validator((input: { projectId: string; expertIds: string[] }) => input)
   .handler(async ({ data }) => {
-    assignExperts(data.projectId, data.expertIds, CURRENT_ACTOR);
+    assignExperts(data.projectId, data.expertIds, getCurrentActor());
     return buildBoard();
   });
 
@@ -47,5 +59,14 @@ export const setCheckResultFn = createServerFn({ method: "POST" })
   .validator((input: { checkId: number; ok: boolean }) => input)
   .handler(async ({ data }) => {
     setCheckResult(data.checkId, data.ok);
+    return buildBoard();
+  });
+
+/** 撤回已出的形式审查结论，课题重新进入待审查队列。 */
+export const reopenReviewFn = createServerFn({ method: "POST" })
+  .validator((input: { projectId: string }) => input)
+  .handler(async ({ data }) => {
+    assertPermission("review:form");
+    reopenReview(data.projectId, getCurrentActor());
     return buildBoard();
   });

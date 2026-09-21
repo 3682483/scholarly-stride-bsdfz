@@ -161,4 +161,44 @@ CREATE TABLE IF NOT EXISTS human_reviews (
 
 CREATE INDEX IF NOT EXISTS idx_ai_reviews_project ON ai_reviews(project_id, stage);
 CREATE INDEX IF NOT EXISTS idx_human_reviews_project ON human_reviews(project_id, stage);
+
+-- 角色（RBAC）
+CREATE TABLE IF NOT EXISTS roles (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  is_system   INTEGER NOT NULL DEFAULT 0,
+  sort_order  INTEGER NOT NULL DEFAULT 0
+);
+
+-- 角色权限关联
+CREATE TABLE IF NOT EXISTS role_permissions (
+  role_id    TEXT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+  permission TEXT NOT NULL,
+  PRIMARY KEY (role_id, permission)
+);
+
+-- 用户
+CREATE TABLE IF NOT EXISTS users (
+  id         TEXT PRIMARY KEY,
+  name       TEXT NOT NULL,
+  username   TEXT NOT NULL UNIQUE,
+  email      TEXT,
+  phone      TEXT,
+  unit       TEXT NOT NULL DEFAULT '',
+  subject    TEXT,
+  title      TEXT,
+  role_id    TEXT NOT NULL REFERENCES roles(id),
+  status     TEXT NOT NULL DEFAULT 'active',
+  last_login TEXT,
+  created_at TEXT NOT NULL
+);
+
+-- 键值状态（如当前登录用户，用于原型阶段的身份切换）
+CREATE TABLE IF NOT EXISTS app_state (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_users_role ON users(role_id);
 `;

@@ -12,6 +12,8 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { Toaster } from "@/components/ui/sonner";
+import { AuthProvider } from "@/components/AuthProvider";
+import { getCurrentUserFn, listSwitchableUsersFn } from "@/api/admin";
 
 function NotFoundComponent() {
   return (
@@ -99,6 +101,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   component: RootComponent,
   notFoundComponent: NotFoundComponent,
   errorComponent: ErrorComponent,
+  loader: async () => {
+    const [currentUser, switchableUsers] = await Promise.all([
+      getCurrentUserFn(),
+      listSwitchableUsersFn(),
+    ]);
+    return { currentUser, switchableUsers };
+  },
 });
 
 function RootShell({ children }: { children: ReactNode }) {
@@ -117,11 +126,14 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  const { currentUser, switchableUsers } = Route.useLoaderData();
 
   return (
     <QueryClientProvider client={queryClient}>
-      {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-      <Outlet />
+      <AuthProvider user={currentUser} switchableUsers={switchableUsers}>
+        {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
+        <Outlet />
+      </AuthProvider>
       <Toaster position="top-right" richColors />
     </QueryClientProvider>
   );

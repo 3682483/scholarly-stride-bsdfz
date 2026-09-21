@@ -3,6 +3,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { Progress, RiskDot, StageTrack, Tag } from "@/components/ui-bits";
+import { useAuth } from "@/lib/auth";
 import { STAGES, type EligibilityItem, type Level, type ProjectDraft } from "@/lib/types";
 import {
   checkEligibilityFn,
@@ -79,6 +80,7 @@ const emptyForm = (level: Level, batch: string): ApplyForm => ({
 function ProjectList() {
   const { projects, batches } = Route.useLoaderData();
   const router = useRouter();
+  const { can } = useAuth();
   const [stage, setStage] = useState<string>("全部");
   const [level, setLevel] = useState<string>("全部");
   const [q, setQ] = useState("");
@@ -220,13 +222,15 @@ function ProjectList() {
         <>
           <button
             onClick={() => setBatchOpen(true)}
-            className="rounded-md border border-border px-3 py-2 text-sm hover:bg-secondary"
+            disabled={!can("batch:create")}
+            className="rounded-md border border-border px-3 py-2 text-sm hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-40"
           >
             新建申报批次
           </button>
           <button
             onClick={openApply}
-            className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground transition-colors hover:bg-primary/90"
+            disabled={!can("project:create")}
+            className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
           >
             申报课题
           </button>

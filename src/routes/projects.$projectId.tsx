@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { Progress, RiskDot, SectionCard, StageTrack, Tag } from "@/components/ui-bits";
 import { ReviewWorkflow } from "@/components/ReviewWorkflow";
+import { useAuth } from "@/lib/auth";
 import { STAGES, type MaterialStatus } from "@/lib/types";
 import { advanceStageFn, exportProjectFn, getProjectFn, setMaterialStatusFn } from "@/api/projects";
 
@@ -40,6 +41,7 @@ const tabs = ["过程管理", "材料档案", "专家与评审", "经费", "操�
 function ProjectDetail() {
   const { project: p } = Route.useLoaderData();
   const router = useRouter();
+  const { can } = useAuth();
   const [tab, setTab] = useState<(typeof tabs)[number]>("过程管理");
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -119,7 +121,7 @@ function ProjectDetail() {
           </Link>
           <button
             onClick={handleExport}
-            disabled={busy === "export"}
+            disabled={busy === "export" || !can("project:export")}
             className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {busy === "export" ? "导出中…" : "导出一题一档"}
@@ -143,7 +145,7 @@ function ProjectDetail() {
           <div className="mt-3">
             <button
               onClick={handleAdvance}
-              disabled={busy === "stage"}
+              disabled={busy === "stage" || !can("stage:advance")}
               className="rounded-md border border-primary/40 bg-primary/5 px-3 py-1.5 text-xs text-primary transition-colors hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {busy === "stage" ? "处理中…" : `推进至「${nextStage}」阶段`}
@@ -229,6 +231,7 @@ function ProjectDetail() {
                 <ReviewWorkflow
                   projectId={p.id}
                   stage={stageReviewLabel}
+                  decidePermission="stage:advance"
                   onDone={() => router.invalidate()}
                 />
               </SectionCard>
@@ -274,7 +277,7 @@ function ProjectDetail() {
                           {m.status !== "已提交" ? (
                             <button
                               onClick={() => handleMaterial(m.id, "已提交")}
-                              disabled={busy === `material-${m.id}`}
+                              disabled={busy === `material-${m.id}` || !can("material:manage")}
                               className="rounded border border-border px-2 py-0.5 text-xs hover:bg-secondary disabled:opacity-50"
                             >
                               确认提交
@@ -282,7 +285,7 @@ function ProjectDetail() {
                           ) : (
                             <button
                               onClick={() => handleMaterial(m.id, "已退回")}
-                              disabled={busy === `material-${m.id}`}
+                              disabled={busy === `material-${m.id}` || !can("material:manage")}
                               className="rounded border border-border px-2 py-0.5 text-xs hover:bg-secondary disabled:opacity-50"
                             >
                               退回
@@ -299,7 +302,12 @@ function ProjectDetail() {
               </p>
             </SectionCard>
             <SectionCard title="材料审核">
-              <ReviewWorkflow projectId={p.id} stage="材料审核" onDone={() => router.invalidate()} />
+              <ReviewWorkflow
+                projectId={p.id}
+                stage="材料审核"
+                decidePermission="material:manage"
+                onDone={() => router.invalidate()}
+              />
             </SectionCard>
             </>
           ) : null}
@@ -325,7 +333,12 @@ function ProjectDetail() {
               )}
             </SectionCard>
             <SectionCard title="评审汇总审核">
-              <ReviewWorkflow projectId={p.id} stage="评审汇总" onDone={() => router.invalidate()} />
+              <ReviewWorkflow
+                projectId={p.id}
+                stage="评审汇总"
+                decidePermission="review:form"
+                onDone={() => router.invalidate()}
+              />
             </SectionCard>
             </>
           ) : null}

@@ -14,6 +14,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { aiPreReviewFn, humanReReviewFn, listReviewRecordsFn } from "@/api/ai";
+import { useAuth } from "@/lib/auth";
 import type { AiConclusion, AiReview, HumanReview } from "@/lib/types";
 
 const conclusionMeta: Record<AiConclusion, { label: string; tone: "ok" | "warn" | "danger" }> = {
@@ -26,10 +27,14 @@ type Props = {
   projectId: string;
   /** 审核环节名称，如 形式审查 / 材料审核 / 评审汇总 / 中期检查 */
   stage: string;
+  /** 作出人工复审结论所需权限（如 review:form / material:manage / stage:advance） */
+  decidePermission: string;
   /** 通过前需要二次确认的提示（例如形式审查仍有未通过项） */
   passWarning?: string;
   /** 复审完成后的回调，通常用于刷新页面数据 */
   onDone?: () => void | Promise<void>;
+  /** 只读模式：仅展示历史记录，不提供复审操作（用于已出结论的课题） */
+  readOnly?: boolean;
   className?: string;
 };
 
@@ -37,7 +42,18 @@ type Props = {
  * 审核环节通用组件：先由 AI 预审给出初步结论，再由人工复审确认或修正。
  * 所有预审与复审记录均落库留痕。
  */
-export function ReviewWorkflow({ projectId, stage, passWarning, onDone, className }: Props) {
+export function ReviewWorkflow({
+  projectId,
+  stage,
+  decidePermission,
+  passWarning,
+  onDone,
+  readOnly = false,
+  className,
+}: Props) {
+  const { can } = useAuth();
+  const canRunAi = can("ai:review");
+  const canDecide = can(decidePermission) && !readOnly;
   const [aiReviews, setAiReviews] = useState<AiReview[]>([]);
   const [humanReviews, setHumanReviews] = useState<HumanReview[]>([]);
   const [loading, setLoading] = useState(true);
@@ -114,14 +130,18 @@ export function ReviewWorkflow({ projectId, stage, passWarning, onDone, classNam
     <div className={className ?? "space-y-3"}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-sm font-semibold">AI 预审 · 人工复审</div>
-        <button
-          type="button"
-          onClick={runAi}
-          disabled={running}
-          className="rounded-md bg-primary px-3 py-1.5 text-xs text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {running ? "预审中…" : "AI 预审"}
-        </button>
+        {canRunAi ? (
+          <button
+            type="button"
+            onClick={runAi}
+            disabled={running}
+            className="rounded-md bg-primary px-3 py-1.5 text-xs text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {running ? "预审中…" : "AI 预审"}
+          </button>
+        ) : (
+          <span className="text-xs text-muted-foreground">当前角色无 AI 预审权限</span>
+        )}
       </div>
 
       {loading ? (
@@ -189,7 +209,7 @@ export function ReviewWorkflow({ projectId, stage, passWarning, onDone, classNam
           <button
             type="button"
             onClick={onPassClick}
-            disabled={submitting}
+            disabled={submitting || !canDecide}
             className="rounded-md bg-primary px-3 py-1.5 text-xs text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
           >
             复审通过
@@ -197,11 +217,16 @@ export function ReviewWorkflow({ projectId, stage, passWarning, onDone, classNam
           <button
             type="button"
             onClick={() => void submitHuman("returned")}
-            disabled={submitting}
+            disabled={submitting || !canDecide}
             className="rounded-md border border-border px-3 py-1.5 text-xs transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
           >
             复审退回
           </button>
+          {readOnly ? (
+            <span className="text-xs text-muted-foreground">该课题已出审查结论，此处仅展示历史记录</span>
+          ) : !canDecide ? (
+            <span className="text-xs text-muted-foreground">当前角色无该环节复审权限</span>
+          ) : null}
           {latestAi ? (
             <span className="text-xs text-muted-foreground">
               当前 AI 结论：{conclusionMeta[latestAi.conclusion].label}

@@ -362,3 +362,153 @@ export const seedAlerts = [
   { projectId: "KT2025031", level: "amber" as Risk, title: "过程材料 75 天未更新", owner: "范知秋" },
   { projectId: "KT2024001", level: "amber" as Risk, title: "经费明细被退回，待重新提交", owner: "郭菲" },
 ];
+
+export type SeedUser = {
+  id: string;
+  name: string;
+  username: string;
+  email: string;
+  phone: string;
+  unit: string;
+  subject: string | null;
+  title: string;
+  roleId: string;
+  status: "active" | "disabled";
+  lastLogin: string | null;
+};
+
+export const seedUsers: SeedUser[] = [
+  {
+    id: "U0001",
+    name: "王砚舟",
+    username: "admin",
+    email: "admin@school.edu.cn",
+    phone: "13800000001",
+    unit: "信息化办公室",
+    subject: null,
+    title: "高级工程师",
+    roleId: "super_admin",
+    status: "active",
+    lastLogin: "2026-09-21 08:30",
+  },
+  {
+    id: "U0002",
+    name: "徐敏",
+    username: "xumin",
+    email: "xumin@school.edu.cn",
+    phone: "13800000002",
+    unit: "科研处",
+    subject: null,
+    title: "助理研究员",
+    roleId: "research_admin",
+    status: "active",
+    lastLogin: "2026-09-20 16:05",
+  },
+  {
+    id: "U0003",
+    name: "邓寒",
+    username: "denghan",
+    email: "denghan@school.edu.cn",
+    phone: "13800000003",
+    unit: "课程教学部",
+    subject: "综合",
+    title: "高级教师",
+    roleId: "leader",
+    status: "active",
+    lastLogin: "2026-09-19 09:12",
+  },
+  {
+    id: "U0004",
+    name: "周雅琴",
+    username: "zhouyq",
+    email: "zhouyq@school.edu.cn",
+    phone: "13800000004",
+    unit: "语文教研组",
+    subject: "语文",
+    title: "中学高级",
+    roleId: "principal",
+    status: "active",
+    lastLogin: "2026-09-02 09:14",
+  },
+  {
+    id: "U0005",
+    name: "许承业",
+    username: "xuchy",
+    email: "xuchy@school.edu.cn",
+    phone: "13800000005",
+    unit: "教育发展与创新研究院",
+    subject: "综合",
+    title: "研究员",
+    roleId: "principal",
+    status: "active",
+    lastLogin: "2026-07-21 11:15",
+  },
+  {
+    id: "U0006",
+    name: "马承宇",
+    username: "machengyu",
+    email: "machengyu@school.edu.cn",
+    phone: "13800000006",
+    unit: "数学教研组",
+    subject: "数学",
+    title: "中学一级",
+    roleId: "principal",
+    status: "active",
+    lastLogin: "2026-09-16 08:50",
+  },
+  {
+    id: "U0007",
+    name: "陈立群",
+    username: "chenlq",
+    email: "chenlq@univ.edu.cn",
+    phone: "13800000007",
+    unit: "课程与教学论",
+    subject: "综合",
+    title: "教授",
+    roleId: "expert",
+    status: "active",
+    lastLogin: "2026-09-19 13:05",
+  },
+  {
+    id: "U0008",
+    name: "吴海若",
+    username: "wuhr",
+    email: "wuhr@univ.edu.cn",
+    phone: "13800000008",
+    unit: "教育测量与评价",
+    subject: "综合",
+    title: "副教授",
+    roleId: "expert",
+    status: "active",
+    lastLogin: null,
+  },
+  {
+    id: "U0009",
+    name: "叶今朝",
+    username: "yejz",
+    email: "yejz@school.edu.cn",
+    phone: "13800000009",
+    unit: "英语教研组",
+    subject: "英语",
+    title: "中学一级",
+    roleId: "teacher",
+    status: "active",
+    lastLogin: "2026-09-19 13:02",
+  },
+  {
+    id: "U0010",
+    name: "范知秋",
+    username: "fanzq",
+    email: "fanzq@school.edu.cn",
+    phone: "13800000010",
+    unit: "科学教研组",
+    subject: "科学",
+    title: "中学二级",
+    roleId: "teacher",
+    status: "disabled",
+    lastLogin: "2026-06-30 10:00",
+  },
+];
+
+/** 原型阶段默认登录用户（总管理员）。 */
+export const DEFAULT_CURRENT_USER_ID = "U0001";

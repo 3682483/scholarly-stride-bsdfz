@@ -178,6 +178,37 @@ export type EligibilityItem = {
   blocking: boolean;
 };
 
+/** 形式审查队列中的课题状态。 */
+export type ReviewQueueStatus = "pending" | "passed" | "returned";
+
+/** 形式审查队列条目（含审查进度与辅助信息）。 */
+export type ReviewQueueItem = {
+  id: string;
+  code: string;
+  title: string;
+  leader: string;
+  unit: string;
+  subject: string;
+  level: Level;
+  batch: string;
+  stage: Stage;
+  risk: Risk;
+  completeness: number;
+  lastUpdate: string;
+  applyYear: number;
+  reviewDecision: ReviewDecision | null;
+  reviewReason: string | null;
+  reviewAt: string | null;
+  /** 已分配专家数 */
+  assignedCount: number;
+  /** 未提交或已退回的材料数 */
+  pendingMaterials: number;
+  /** 形式审查环节最近一次 AI 预审结论 */
+  aiConclusion: AiConclusion | null;
+  aiScore: number | null;
+  aiReviewedAt: string | null;
+};
+
 /** AI 预审结论。 */
 export type AiConclusion = "pass" | "revise" | "reject";
 
@@ -227,4 +258,69 @@ export type AiPreReviewResult = {
   summary: string;
   risks: string[];
   suggestions: string[];
+};
+
+// ---------------------------------------------------------------- 用户与角色（RBAC）
+
+export type UserStatus = "active" | "disabled";
+
+/** 角色（含权限集合与关联用户数）。 */
+export type Role = {
+  id: string;
+  name: string;
+  description: string;
+  /** 内置角色不可删除 */
+  system: boolean;
+  permissions: string[];
+  userCount: number;
+};
+
+/** 用户列表项。 */
+export type User = {
+  id: string;
+  name: string;
+  username: string;
+  email: string | null;
+  phone: string | null;
+  unit: string;
+  subject: string | null;
+  title: string | null;
+  roleId: string;
+  roleName: string;
+  status: UserStatus;
+  lastLogin: string | null;
+  createdAt: string;
+};
+
+/** 当前登录用户（含权限集合）。 */
+export type CurrentUser = {
+  id: string;
+  name: string;
+  username: string;
+  unit: string;
+  roleId: string;
+  roleName: string;
+  permissions: string[];
+};
+
+export type CreateUserInput = {
+  name: string;
+  username: string;
+  email: string;
+  phone: string;
+  unit: string;
+  subject: string;
+  title: string;
+  roleId: string;
+  status: UserStatus;
+};
+
+export type UpdateUserInput = CreateUserInput & { id: string };
+
+/** 身份切换下拉使用的精简用户信息。 */
+export type SwitchableUser = {
+  id: string;
+  name: string;
+  roleName: string;
+  unit: string;
 };

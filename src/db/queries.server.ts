@@ -10,6 +10,8 @@ import type {
   AnalyticsYear,
   Batch,
   CheckItem,
+  CreateUserInput,
+  CurrentUser,
   DashboardData,
   EligibilityItem,
   Expert,
@@ -23,11 +25,16 @@ import type {
   ProjectDraft,
   ProjectSummary,
   ReviewDecision,
+  ReviewQueueItem,
   ReviewRecord,
   ReviewRecords,
   Risk,
+  Role,
   Stage,
   Todo,
+  UpdateUserInput,
+  User,
+  UserStatus,
 } from "@/lib/types";
 
 type ProjectRow = {
@@ -205,17 +212,57 @@ export function setCheckResult(id: number, ok: boolean): CheckItem | null {
   return row ? { id: row.id, name: row.name, ok: row.ok === 1 } : null;
 }
 
-export function listReviewCandidates(): ProjectSummary[] {
+type ReviewQueueRow = ProjectRow & {
+  assigned_count: number;
+  pending_materials: number;
+  ai_conclusion: string | null;
+  ai_score: number | null;
+  ai_reviewed_at: string | null;
+};
+
+/**
+ * 形式审查队列：待审查（申报/评审阶段且未出结论）+ 已出结论（通过/退回）的课题。
+ * 附带专家分配数、待补材料数与最近一次形式审查 AI 预审结论，便于列表直接展示进度。
+ */
+export function listReviewQueue(): ReviewQueueItem[] {
   const rows = getDb()
     .prepare(
       `SELECT ${PROJECT_COLUMNS},
-              (SELECT COUNT(*) FROM project_members m WHERE m.project_id = p.id) AS member_count
+        (SELECT COUNT(*) FROM assignments a WHERE a.project_id = p.id) AS assigned_count,
+        (SELECT COUNT(*) FROM materials mt WHERE mt.project_id = p.id AND mt.status <> '已提交') AS pending_materials,
+        (SELECT ar.conclusion FROM ai_reviews ar WHERE ar.project_id = p.id AND ar.stage = '形式审查' ORDER BY ar.id DESC LIMIT 1) AS ai_conclusion,
+        (SELECT ar.score FROM ai_reviews ar WHERE ar.project_id = p.id AND ar.stage = '形式审查' ORDER BY ar.id DESC LIMIT 1) AS ai_score,
+        (SELECT ar.created_at FROM ai_reviews ar WHERE ar.project_id = p.id AND ar.stage = '形式审查' ORDER BY ar.id DESC LIMIT 1) AS ai_reviewed_at
        FROM projects p
-       WHERE p.stage IN ('申报', '评审') AND p.review_decision IS NULL
-       ORDER BY p.apply_year DESC, p.id`,
+       WHERE (p.stage IN ('申报', '评审') AND p.review_decision IS NULL)
+          OR p.review_decision IS NOT NULL
+       ORDER BY p.apply_year DESC, p.id DESC`,
     )
-    .all() as ProjectRow[];
-  return rows.map(mapSummary);
+    .all() as ReviewQueueRow[];
+
+  return rows.map((r) => ({
+    id: r.id,
+    code: r.code,
+    title: r.title,
+    leader: r.leader,
+    unit: r.unit,
+    subject: r.subject,
+    level: r.level as Level,
+    batch: r.batch,
+    stage: r.stage as Stage,
+    risk: r.risk as Risk,
+    completeness: r.completeness,
+    lastUpdate: r.last_update,
+    applyYear: r.apply_year,
+    reviewDecision: (r.review_decision as ReviewDecision | null) ?? null,
+    reviewReason: r.review_reason,
+    reviewAt: r.review_at,
+    assignedCount: r.assigned_count,
+    pendingMaterials: r.pending_materials,
+    aiConclusion: (r.ai_conclusion as AiConclusion | null) ?? null,
+    aiScore: r.ai_score,
+    aiReviewedAt: r.ai_reviewed_at,
+  }));
 }
 
 export function listExperts(): Expert[] {
@@ -274,6 +321,28 @@ export function submitReviewDecision(
         reason,
       );
     }
+  });
+  tx();
+}
+
+/** 撤回形式审查结论，使课题重新回到待审查队列。 */
+export function reopenReview(projectId: string, actor: string): void {
+  const db = getDb();
+  const at = nowStamp();
+  const tx = db.transaction(() => {
+    db.prepare(
+      `UPDATE projects
+       SET review_decision = NULL, review_reason = NULL, review_at = NULL,
+           stage = '申报', last_update = ?
+       WHERE id = ?`,
+    ).run(at.slice(0, 10), projectId);
+    db.prepare(`INSERT INTO logs (project_id, time, actor, action, note) VALUES (?, ?, ?, ?, ?)`).run(
+      projectId,
+      at,
+      actor,
+      "撤回形式审查结论",
+      "课题重新进入待审查队列",
+    );
   });
   tx();
 }
@@ -802,4 +871,266 @@ export function getReviewRecords(projectId: string, stage: string): ReviewRecord
     ai: listAiReviews(projectId, stage),
     human: listHumanReviews(projectId, stage),
   };
+}
+
+// ---------------------------------------------------------------- 角色与权限（RBAC）
+
+type RoleRow = {
+  id: string;
+  name: string;
+  description: string;
+  is_system: number;
+};
+
+type UserRow = {
+  id: string;
+  name: string;
+  username: string;
+  email: string | null;
+  phone: string | null;
+  unit: string;
+  subject: string | null;
+  title: string | null;
+  role_id: string;
+  role_name: string;
+  status: string;
+  last_login: string | null;
+  created_at: string;
+};
+
+export function listRolePermissions(roleId: string): string[] {
+  const rows = getDb()
+    .prepare(`SELECT permission FROM role_permissions WHERE role_id = ?`)
+    .all(roleId) as { permission: string }[];
+  return rows.map((r) => r.permission);
+}
+
+export function listRoles(): Role[] {
+  const db = getDb();
+  const roles = db
+    .prepare(`SELECT id, name, description, is_system FROM roles ORDER BY sort_order, id`)
+    .all() as RoleRow[];
+  const permissions = db
+    .prepare(`SELECT role_id, permission FROM role_permissions`)
+    .all() as { role_id: string; permission: string }[];
+  const counts = db
+    .prepare(`SELECT role_id, COUNT(*) AS c FROM users GROUP BY role_id`)
+    .all() as { role_id: string; c: number }[];
+
+  const permissionMap = new Map<string, string[]>();
+  for (const p of permissions) {
+    const list = permissionMap.get(p.role_id) ?? [];
+    list.push(p.permission);
+    permissionMap.set(p.role_id, list);
+  }
+  const countMap = new Map(counts.map((c) => [c.role_id, c.c]));
+
+  return roles.map((r) => ({
+    id: r.id,
+    name: r.name,
+    description: r.description,
+    system: r.is_system === 1,
+    permissions: permissionMap.get(r.id) ?? [],
+    userCount: countMap.get(r.id) ?? 0,
+  }));
+}
+
+export function getRole(roleId: string): Role | null {
+  return listRoles().find((r) => r.id === roleId) ?? null;
+}
+
+export function setRolePermissions(roleId: string, permissions: string[]): Role | null {
+  const db = getDb();
+  if (!getRole(roleId)) return null;
+  const tx = db.transaction(() => {
+    db.prepare(`DELETE FROM role_permissions WHERE role_id = ?`).run(roleId);
+    const insert = db.prepare(
+      `INSERT OR IGNORE INTO role_permissions (role_id, permission) VALUES (?, ?)`,
+    );
+    for (const permission of permissions) insert.run(roleId, permission);
+  });
+  tx();
+  return getRole(roleId);
+}
+
+const USER_COLUMNS = `
+  u.id, u.name, u.username, u.email, u.phone, u.unit, u.subject, u.title,
+  u.role_id, r.name AS role_name, u.status, u.last_login, u.created_at`;
+
+function mapUser(r: UserRow): User {
+  return {
+    id: r.id,
+    name: r.name,
+    username: r.username,
+    email: r.email,
+    phone: r.phone,
+    unit: r.unit,
+    subject: r.subject,
+    title: r.title,
+    roleId: r.role_id,
+    roleName: r.role_name,
+    status: r.status as UserStatus,
+    lastLogin: r.last_login,
+    createdAt: r.created_at,
+  };
+}
+
+export function listUsers(): User[] {
+  const rows = getDb()
+    .prepare(`SELECT ${USER_COLUMNS} FROM users u JOIN roles r ON r.id = u.role_id ORDER BY u.id`)
+    .all() as UserRow[];
+  return rows.map(mapUser);
+}
+
+export function getUserById(id: string): User | null {
+  const row = getDb()
+    .prepare(`SELECT ${USER_COLUMNS} FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ?`)
+    .get(id) as UserRow | undefined;
+  return row ? mapUser(row) : null;
+}
+
+function nextUserId(): string {
+  const rows = getDb().prepare(`SELECT id FROM users`).all() as { id: string }[];
+  let max = 0;
+  for (const r of rows) {
+    const n = Number(r.id.slice(1));
+    if (Number.isFinite(n) && n > max) max = n;
+  }
+  return `U${String(max + 1).padStart(4, "0")}`;
+}
+
+export function createUser(input: CreateUserInput): User {
+  const db = getDb();
+  const duplicate = db.prepare(`SELECT id FROM users WHERE username = ?`).get(input.username) as
+    | { id: string }
+    | undefined;
+  if (duplicate) throw new Error(`工号「${input.username}」已存在`);
+
+  const id = nextUserId();
+  db.prepare(
+    `INSERT INTO users
+       (id, name, username, email, phone, unit, subject, title, role_id, status, last_login, created_at)
+     VALUES
+       (@id, @name, @username, @email, @phone, @unit, @subject, @title, @roleId, @status, NULL, @createdAt)`,
+  ).run({
+    id,
+    name: input.name,
+    username: input.username,
+    email: input.email || null,
+    phone: input.phone || null,
+    unit: input.unit,
+    subject: input.subject || null,
+    title: input.title || null,
+    roleId: input.roleId,
+    status: input.status,
+    createdAt: nowStamp(),
+  });
+
+  const created = getUserById(id);
+  if (!created) throw new Error("创建用户失败");
+  return created;
+}
+
+export function updateUser(input: UpdateUserInput): User {
+  const db = getDb();
+  const duplicate = db
+    .prepare(`SELECT id FROM users WHERE username = ? AND id <> ?`)
+    .get(input.username, input.id) as { id: string } | undefined;
+  if (duplicate) throw new Error(`工号「${input.username}」已被其他用户占用`);
+
+  const info = db
+    .prepare(
+      `UPDATE users
+       SET name = @name, username = @username, email = @email, phone = @phone,
+           unit = @unit, subject = @subject, title = @title, role_id = @roleId, status = @status
+       WHERE id = @id`,
+    )
+    .run({
+      id: input.id,
+      name: input.name,
+      username: input.username,
+      email: input.email || null,
+      phone: input.phone || null,
+      unit: input.unit,
+      subject: input.subject || null,
+      title: input.title || null,
+      roleId: input.roleId,
+      status: input.status,
+    });
+  if (info.changes === 0) throw new Error("用户不存在");
+
+  const updated = getUserById(input.id);
+  if (!updated) throw new Error("更新用户失败");
+  return updated;
+}
+
+export function setUserStatus(id: string, status: UserStatus): User {
+  getDb().prepare(`UPDATE users SET status = ? WHERE id = ?`).run(status, id);
+  const user = getUserById(id);
+  if (!user) throw new Error("用户不存在");
+  return user;
+}
+
+/** 启用状态的总管理员数量（用于防止停用最后一个总管理员）。 */
+export function countActiveSuperAdmins(): number {
+  const row = getDb()
+    .prepare(`SELECT COUNT(*) AS c FROM users WHERE role_id = 'super_admin' AND status = 'active'`)
+    .get() as { c: number };
+  return row.c;
+}
+
+// ---------------------------------------------------------------- 当前登录用户
+
+function readState(key: string): string | null {
+  const row = getDb().prepare(`SELECT value FROM app_state WHERE key = ?`).get(key) as
+    | { value: string }
+    | undefined;
+  return row?.value ?? null;
+}
+
+function writeState(key: string, value: string): void {
+  getDb().prepare(`INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)`).run(key, value);
+}
+
+/** 当前登录用户（含权限）。若被停用或不存在，回退到可用的总管理员。 */
+export function getCurrentUser(): CurrentUser | null {
+  const currentId = readState("current_user_id");
+  let user = currentId ? getUserById(currentId) : null;
+
+  if (!user || user.status !== "active") {
+    const fallback = getDb()
+      .prepare(
+        `SELECT id FROM users WHERE role_id = 'super_admin' AND status = 'active' ORDER BY id LIMIT 1`,
+      )
+      .get() as { id: string } | undefined;
+    if (!fallback) return null;
+    writeState("current_user_id", fallback.id);
+    user = getUserById(fallback.id);
+    if (!user) return null;
+  }
+
+  return {
+    id: user.id,
+    name: user.name,
+    username: user.username,
+    unit: user.unit,
+    roleId: user.roleId,
+    roleName: user.roleName,
+    permissions: listRolePermissions(user.roleId),
+  };
+}
+
+export function setCurrentUserId(id: string): CurrentUser | null {
+  const user = getUserById(id);
+  if (!user) throw new Error("用户不存在");
+  if (user.status !== "active") throw new Error(`用户「${user.name}」已停用，无法切换`);
+  writeState("current_user_id", id);
+  return getCurrentUser();
+}
+
+/** 操作留痕中使用的操作者名称，如「科研处 · 徐敏」。 */
+export function getCurrentActor(): string {
+  const user = getCurrentUser();
+  if (!user) return "系统";
+  return user.unit ? `${user.unit} · ${user.name}` : user.name;
 }

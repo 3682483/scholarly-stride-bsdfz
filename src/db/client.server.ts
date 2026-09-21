@@ -9,8 +9,11 @@ import type { Database as DatabaseType, Statement } from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
+import { ROLE_DEFS } from "@/lib/permissions";
+
 import { SCHEMA_SQL } from "./schema.server";
 import {
+  DEFAULT_CURRENT_USER_ID,
   seedAlerts,
   seedBatches,
   seedChecks,
@@ -18,6 +21,7 @@ import {
   seedPolicies,
   seedProjects,
   seedTodos,
+  seedUsers,
 } from "./seed-data.server";
 
 let cached: DatabaseType | null = null;
@@ -43,11 +47,11 @@ function createConnection(): DatabaseType {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.exec(SCHEMA_SQL);
-  seedIfEmpty(db);
+  seedAll(db);
   return db;
 }
 
-function seedIfEmpty(db: DatabaseType): void {
+function seedProjectData(db: DatabaseType): void {
   const row = db.prepare("SELECT COUNT(*) AS c FROM projects").get() as { c: number };
   if (row.c > 0) return;
 
@@ -184,6 +188,58 @@ function seedIfEmpty(db: DatabaseType): void {
   });
 
   run();
+}
+
+/**
+ * 初始化 RBAC 数据（角色、角色权限、用户、当前登录用户）。
+ * 独立判断 roles 是否为空，便于对已有数据库增量补齐。
+ */
+function seedRbac(db: DatabaseType): void {
+  const row = db.prepare("SELECT COUNT(*) AS c FROM roles").get() as { c: number };
+  if (row.c > 0) return;
+
+  const insertRole = db.prepare(
+    `INSERT INTO roles (id, name, description, is_system, sort_order)
+     VALUES (@id, @name, @description, @isSystem, @sortOrder)`,
+  );
+  const insertRolePermission = db.prepare(
+    `INSERT OR IGNORE INTO role_permissions (role_id, permission) VALUES (?, ?)`,
+  );
+  const insertUser = db.prepare(
+    `INSERT INTO users
+       (id, name, username, email, phone, unit, subject, title, role_id, status, last_login, created_at)
+     VALUES
+       (@id, @name, @username, @email, @phone, @unit, @subject, @title, @roleId, @status, @lastLogin, @createdAt)`,
+  );
+  const setState = db.prepare(`INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)`);
+
+  const tx = db.transaction(() => {
+    ROLE_DEFS.forEach((role, index) => {
+      insertRole.run({
+        id: role.id,
+        name: role.name,
+        description: role.description,
+        isSystem: role.system ? 1 : 0,
+        sortOrder: index,
+      });
+      for (const permission of role.permissions) {
+        insertRolePermission.run(role.id, permission);
+      }
+    });
+
+    const createdAt = nowStamp();
+    for (const user of seedUsers) {
+      insertUser.run({ ...user, createdAt });
+    }
+
+    setState.run("current_user_id", DEFAULT_CURRENT_USER_ID);
+  });
+  tx();
+}
+
+function seedAll(db: DatabaseType): void {
+  seedProjectData(db);
+  seedRbac(db);
 }
 
 /** 获取（并缓存）数据库连接。 */

@@ -1,11 +1,11 @@
 import { createServerFn } from "@tanstack/react-start";
 
-import { CURRENT_ACTOR } from "@/lib/constants";
 import { getAiProviderInfo, runAiPreReview } from "@/lib/deepseek.server";
 import type { ReviewDecision } from "@/lib/types";
 import { nowStamp } from "@/db/client.server";
 import {
   appendLog,
+  getCurrentActor,
   getProjectById,
   getReviewRecords,
   insertAiReview,
@@ -70,18 +70,18 @@ export const humanReReviewFn = createServerFn({ method: "POST" })
       decision: data.decision,
       agreesWithAi,
       comment: data.comment,
-      reviewer: CURRENT_ACTOR,
+      reviewer: getCurrentActor(),
       createdAt: nowStamp(),
     });
 
     if (data.stage === "形式审查") {
       // 复用既有形式审查流转：更新课题状态、补材料、写操作留痕
-      submitReviewDecision(data.projectId, data.decision, data.comment, CURRENT_ACTOR);
+      submitReviewDecision(data.projectId, data.decision, data.comment, getCurrentActor());
     } else {
       const verdict = data.decision === "passed" ? "通过" : "退回";
       appendLog(
         data.projectId,
-        CURRENT_ACTOR,
+        getCurrentActor(),
         `人工复审（${data.stage}）`,
         `${verdict}${data.comment ? `：${data.comment}` : ""}`,
       );
